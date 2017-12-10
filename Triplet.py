@@ -68,7 +68,6 @@ class SeqDatasetGenerator(object):
 
         for file in file_list:
             words = []
-            print(file_list)
             for accession in SeqIO.parse(file, 'genbank'):
                 print("filename {} has taxonomy {}".format(file, accession.annotations["taxonomy"]))
                 # print(accession.id)
@@ -257,10 +256,10 @@ class Triplet:
 
 
 # set parameters
-k_mer_len = 150
-batch_size = 2000
+k_mer_len = 15
+batch_size = 200
 logging_frequency = 25
-iterations = 300
+iterations = 100
 margin = 1
 visualization_batch_size = 100
 top_k_iter_start = 300  # after how many iterations training on only easiest triplets should begin
@@ -361,7 +360,7 @@ with tf.Session() as sess:
               " batch_size=" + str(batch_size) + " embed_dim=" + str(128))  # RECORD DIMENSION HERE
 
     os.system('say "finished"')
-
+    plt.savefig("Figures/triplet_figure")
     plt.show()
 
 
