@@ -4,11 +4,12 @@ import os
 from Bio import SeqIO
 from random import shuffle, sample
 from sklearn.manifold import TSNE
+import matplotlib
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import _pickle as pickle
 from math import sqrt
 import sys
-
 
 # def seq2binary(seq):
 #     # N's = G's
@@ -256,10 +257,10 @@ class Triplet:
 
 
 # set parameters
-k_mer_len = 15
+k_mer_len = 100
 batch_size = 200
 logging_frequency = 25
-iterations = 100
+iterations = 2000
 margin = 1
 visualization_batch_size = 100
 top_k_iter_start = 300  # after how many iterations training on only easiest triplets should begin
@@ -361,6 +362,6 @@ with tf.Session() as sess:
 
     os.system('say "finished"')
     plt.savefig("Figures/triplet_figure")
-    plt.show()
+    # plt.show()
 
 
