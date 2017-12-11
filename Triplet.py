@@ -247,15 +247,15 @@ class Triplet:
 
 # set parameters
 k_mer_len = 100
-batch_size = 100
+batch_size = 1000
 logging_frequency = 25
-iterations = 50
+iterations = 500
 margin = 1
 visualization_batch_size = 100
 top_k_iter_start = 300  # after how many iterations training on only easiest triplets should begin
 n_easiest = batch_size  # how many triplets from the batch to calculate loss by after top_k_iter_start reached
 seq_dim = 4
-test_num = 100
+test_num = 10
 
 print("...loading k-mers from genome files")
 try:
@@ -341,15 +341,17 @@ with tf.Session() as sess:
     cmap = get_cmap(len(unclassified_file_list) + len(file_list) + 2)
 
     for t in range(0, len(file_list)):
-        start = batch_size * t * (len(file_list) - 1)
-        stop = start + batch_size * (len(file_list) - 1)
+        start = visualization_batch_size * t * (len(file_list) - 1)
+        stop = start + visualization_batch_size * (len(file_list) - 1)
         plt.scatter(Y[start:stop, 0], Y[start:stop, 1], c=cmap(len(unclassified_file_list) + 1 + t), label=file_list[t])
         end_of_train = stop
 
     for u in range(0, len(unclassified_file_list)):
-        start = visualization_batch_size * u + end_of_train
-        stop = start + visualization_batch_size
+        start = test_num * u + end_of_train
+        stop = start + test_num
         plt.scatter(Y[start:stop, 0], Y[start:stop, 1], c=cmap(u), label=unclassified_file_list[u])
+        end_of_unc = stop
+    print(end_of_unc)
 
     plt.legend()
     plt.title("k=" + str(k_mer_len) + " iter=" + str(iterations) +
