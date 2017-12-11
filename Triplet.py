@@ -247,7 +247,7 @@ class Triplet:
 
 # set parameters
 k_mer_len = 100
-batch_size = 200
+batch_size = 100
 logging_frequency = 25
 iterations = 50
 margin = 1
@@ -255,7 +255,7 @@ visualization_batch_size = 100
 top_k_iter_start = 300  # after how many iterations training on only easiest triplets should begin
 n_easiest = batch_size  # how many triplets from the batch to calculate loss by after top_k_iter_start reached
 seq_dim = 4
-test_num = 5
+test_num = 100
 
 print("...loading k-mers from genome files")
 try:
@@ -298,9 +298,9 @@ with tf.Session() as sess:
     distance_matrix = np.zeros((len(file_list), len(file_list)))
     mean_vecs = []
     vars = []
-    unclassifified_embed_array = []
+    unclassified_embed_array = []
 
-    # # find average vector for each genome, plot with test reads
+    # find average vector for each genome, plot with test reads
     for a_num in range(0, len(file_list)):
         a_embeddings = 0
         for b_num in range(0, len(file_list)):
@@ -310,6 +310,7 @@ with tf.Session() as sess:
                     a_embeddings = np.append(a_embeddings, sess.run(triplet.o, feed_dict={triplet.x: visualize_batch[0]}), axis=0)
                 except ValueError:
                     a_embeddings = sess.run(triplet.o, feed_dict={triplet.x: visualize_batch[0]})
+        print(a_embeddings.shape)
         train_embed_array.append(a_embeddings)
         mean = np.mean(train_embed_array[a_num], axis=0)
         train_mean_vecs.append(mean)
@@ -321,35 +322,35 @@ with tf.Session() as sess:
 
     # embed unclassified reads
     for file in unclassified_file_list:
-        unclassified_reads = 0
-        unclassified_embeddings = 0
         unclassified_reads = get_test_reads(file, k_mer_len, test_num)
         for i in range(0, len(unclassified_reads)):
             unclassified_reads[i] = seq2binary(unclassified_reads[i])
         unclassified_embeddings = sess.run(triplet.o, feed_dict={triplet.x: unclassified_reads})
-        unclassifified_embed_array.append(unclassified_embeddings)
-
+        print(unclassified_embeddings.shape)
+        unclassified_embed_array.append(unclassified_embeddings)
 
     # plot unclassified reads with training set embeddings
-
-    flat_list = [item for sublist in unclassifified_embed_array for item in sublist]
-    flat_list = flat_list + [item for sublist in train_embed_array for item in sublist]
-    # print(flat_list)
+    flat_list = [item for sublist in train_embed_array for item in sublist]
+    flat_list = flat_list + [item for sublist in unclassified_embed_array for item in sublist]
+    print("len flat list: {}".format(len(flat_list)))
 
     tsne_model = TSNE(n_components=2, verbose=0)
     Y = tsne_model.fit_transform(flat_list)
+    print("len Y: {}".format(len(Y)))
 
     cmap = get_cmap(len(unclassified_file_list) + len(file_list) + 2)
-
-    for u in range(0, len(unclassified_file_list)):
-        start = visualization_batch_size * u * (len(unclassified_file_list) - 1)
-        stop = start + visualization_batch_size*(len(unclassified_file_list) - 1)
-        plt.scatter(Y[start:stop, 0], Y[start:stop, 1], c=cmap(u), label=unclassified_file_list[u])
 
     for t in range(0, len(file_list)):
         start = batch_size * t * (len(file_list) - 1)
         stop = start + batch_size * (len(file_list) - 1)
         plt.scatter(Y[start:stop, 0], Y[start:stop, 1], c=cmap(len(unclassified_file_list) + 1 + t), label=file_list[t])
+        end_of_train = stop
+
+    for u in range(0, len(unclassified_file_list)):
+        start = visualization_batch_size * u + end_of_train
+        stop = start + visualization_batch_size
+        plt.scatter(Y[start:stop, 0], Y[start:stop, 1], c=cmap(u), label=unclassified_file_list[u])
+
     plt.legend()
     plt.title("k=" + str(k_mer_len) + " iter=" + str(iterations) +
               " batch_size=" + str(batch_size) + " embed_dim=" + str(128))  # RECORD DIMENSION HERE
