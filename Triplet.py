@@ -4,31 +4,17 @@ import os
 from Bio import SeqIO
 from random import shuffle, sample
 from sklearn.manifold import TSNE
-import matplotlib
-matplotlib.use('agg')
-import matplotlib.pyplot as plt
 import _pickle as pickle
 from math import sqrt
 import sys
+from get_test_reads_sra import get_test_reads, get_test_tax
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
 
-# def seq2binary(seq):
-#     # N's = G's
-#     binary_kmer = np.zeros((len(seq), 2))
-#     for i in range(0, len(seq)):
-#         c = seq[i]
-#         if c == 'A' or c == 'C':
-#             binary_kmer[i, 0] = 0
-#         else:
-#             binary_kmer[i, 0] = 1
-#
-#         if c == 'A' or c == 'T':
-#             binary_kmer[i, 1] = 0
-#         else:
-#             binary_kmer[i, 1] = 1
-#     return binary_kmer
 
 def seq2binary(seq):
-    binary_kmer = np.zeros((len(seq), 4))
+    binary_kmer = np.zeros((len(seq), seq_dim))
     for i in range(0, len(seq)):
         c = seq[i]
         if c == 'A':
@@ -148,6 +134,9 @@ class SeqDatasetGenerator(object):
     def generate_data_train(self, batch_size):
         return SeqDatasetGenerator.__generate_data(batch_size, self.kmers_by_genome_train)
 
+    def generate_data_visualization(self, batch_size, a_num, b_num):
+        return SeqDatasetGenerator.__generate_data_one_genome(batch_size, self.kmers_by_genome_train, a_num, b_num)
+
     def generate_data_test(self, batch_size, a_num, b_num):
         return SeqDatasetGenerator.__generate_data_one_genome(batch_size, self.kmers_by_genome_test, a_num, b_num)
 
@@ -260,12 +249,13 @@ class Triplet:
 k_mer_len = 100
 batch_size = 200
 logging_frequency = 25
-iterations = 2000
+iterations = 50
 margin = 1
 visualization_batch_size = 100
 top_k_iter_start = 300  # after how many iterations training on only easiest triplets should begin
 n_easiest = batch_size  # how many triplets from the batch to calculate loss by after top_k_iter_start reached
 seq_dim = 4
+test_num = 5
 
 print("...loading k-mers from genome files")
 try:
@@ -274,6 +264,13 @@ try:
 except FileNotFoundError:
     seq_dataset_generator, file_list = SeqDatasetGenerator.default_load(k=k_mer_len)
     seq_dataset_generator.save_to_file(file_name=str(k_mer_len)+'seq_dataset')
+
+unclassified_file_list = []
+for file_name in os.listdir('SRA_Test_Sequences'):
+    if file_name.endswith(".fastq"):
+        file_name = os.path.join('SRA_Test_Sequences', file_name)
+        unclassified_file_list.append(file_name)
+# print(file_list)
 
 triplet = Triplet(kmer_len=k_mer_len, alpha=margin)
 train_step = tf.train.AdamOptimizer(10e-5).minimize(triplet.loss)
@@ -286,82 +283,145 @@ with tf.Session() as sess:
         # top_k = batch_size
         batch = seq_dataset_generator.generate_data_train(batch_size)
         if i % logging_frequency == 0:
-            loss = sess.run(triplet.loss, feed_dict={triplet.top_k: n_easiest, triplet.x: batch[0], triplet.xp: batch[1], triplet.xn: batch[2]})
+            loss = sess.run(triplet.loss, feed_dict={triplet.top_k: n_easiest, triplet.x: batch[0],
+                                                     triplet.xp: batch[1], triplet.xn: batch[2]})
             print('step %d, training loss %g' % (i, loss))
-        train_step.run(feed_dict={triplet.top_k: top_k, triplet.x: batch[0], triplet.xp: batch[1], triplet.xn: batch[2]})
+        train_step.run(feed_dict={triplet.top_k: top_k, triplet.x: batch[0], triplet.xp: batch[1],
+                                  triplet.xn: batch[2]})
 
     print("...validating model")
+    train_embed_array = []
+    train_mean_vecs = []
+    train_vars = []
     embed_array = []
     confusion_matrix = np.zeros((len(file_list), len(file_list)))
     distance_matrix = np.zeros((len(file_list), len(file_list)))
     mean_vecs = []
     vars = []
+    unclassifified_embed_array = []
 
-    # test model, print loss when every genome compared against every other
-    top_k = visualization_batch_size  # calculate test loss on all triplets, not just easiest
+    # # find average vector for each genome, plot with test reads
     for a_num in range(0, len(file_list)):
         a_embeddings = 0
         for b_num in range(0, len(file_list)):
-            # print("a, b: {},{}".format(a_num, b_num))
-            if a_num == b_num:
-                confusion_matrix[a_num, b_num] = float('nan')
-            else:
-                # a_name = file_list[a_name]
-                # b_name = file_list[b_name]
-
-                test_batch = seq_dataset_generator.generate_data_test(visualization_batch_size, a_num, b_num)
-                test_loss = sess.run(triplet.loss,
-                                     feed_dict={triplet.x: test_batch[0], triplet.xp: test_batch[1], triplet.xn: test_batch[2]})
-                confusion_matrix[a_num, b_num] = test_loss
-
+            if a_num != b_num:
+                visualize_batch = seq_dataset_generator.generate_data_visualization(visualization_batch_size, a_num, b_num)
                 try:
-                    a_embeddings = np.append(a_embeddings, sess.run(triplet.o, feed_dict={triplet.x: test_batch[0]}), axis=0)
+                    a_embeddings = np.append(a_embeddings, sess.run(triplet.o, feed_dict={triplet.x: visualize_batch[0]}), axis=0)
                 except ValueError:
-                    a_embeddings = sess.run(triplet.o, feed_dict={triplet.x: test_batch[0]})
-
-        # print("a_embedding shape: {}".format(a_embeddings.shape))
-        embed_array.append(a_embeddings)
-        mean = np.mean(embed_array[a_num], axis=0)
-        mean_vecs.append(mean)
-        dist_from_mean = embed_array[a_num] - mean
+                    a_embeddings = sess.run(triplet.o, feed_dict={triplet.x: visualize_batch[0]})
+        train_embed_array.append(a_embeddings)
+        mean = np.mean(train_embed_array[a_num], axis=0)
+        train_mean_vecs.append(mean)
+        dist_from_mean = train_embed_array[a_num] - mean
         sq_dist = np.square(dist_from_mean)
         mag_dist = np.linalg.norm(sq_dist, axis=1)
         var = sqrt(sum(mag_dist))
-        vars.append(var)
+        train_vars.append(var)
 
-    # print("embed array length: {}".format(len(embed_array)))
-    # for i in range(0, len(embed_array)):
-        # print("embed array entry {} shape: {}".format(i, embed_array[i].shape))
+    # embed unclassified reads
+    for file in unclassified_file_list:
+        unclassified_reads = 0
+        unclassified_embeddings = 0
+        unclassified_reads = get_test_reads(file, k_mer_len, test_num)
+        for i in range(0, len(unclassified_reads)):
+            unclassified_reads[i] = seq2binary(unclassified_reads[i])
+        unclassified_embeddings = sess.run(triplet.o, feed_dict={triplet.x: unclassified_reads})
+        unclassifified_embed_array.append(unclassified_embeddings)
 
-    for a_num in range(0, len(file_list)):
-        for b_num in range(0, len(file_list)):
-            distance_matrix[a_num, b_num] = np.linalg.norm(mean_vecs[a_num] - mean_vecs[b_num])
 
-    print("variances")
-    print(vars)
-    print("distance matrix")
-    print(distance_matrix)
-    print("confusion matrix of losses")
-    print(confusion_matrix)
+    # plot unclassified reads with training set embeddings
 
-    print("...graphing test embeddings")
-    flat_list = [item for sublist in embed_array for item in sublist]
+    flat_list = [item for sublist in unclassifified_embed_array for item in sublist]
+    flat_list = flat_list + [item for sublist in train_embed_array for item in sublist]
+    # print(flat_list)
 
     tsne_model = TSNE(n_components=2, verbose=0)
     Y = tsne_model.fit_transform(flat_list)
 
-    cmap = get_cmap(len(file_list)+1)
+    cmap = get_cmap(len(unclassified_file_list) + len(file_list) + 2)
 
-    for a_num in range(0, len(file_list)):
-        start = visualization_batch_size*a_num*(len(file_list) - 1)
-        stop = start + visualization_batch_size*(len(file_list) - 1)
-        plt.scatter(Y[start:stop, 0], Y[start:stop, 1], c=cmap(a_num), label=file_list[a_num])
+    for u in range(0, len(unclassified_file_list)):
+        start = visualization_batch_size * u * (len(unclassified_file_list) - 1)
+        stop = start + visualization_batch_size*(len(unclassified_file_list) - 1)
+        plt.scatter(Y[start:stop, 0], Y[start:stop, 1], c=cmap(u), label=unclassified_file_list[u])
+
+    for t in range(0, len(file_list)):
+        start = batch_size * t * (len(file_list) - 1)
+        stop = start + batch_size * (len(file_list) - 1)
+        plt.scatter(Y[start:stop, 0], Y[start:stop, 1], c=cmap(len(unclassified_file_list) + 1 + t), label=file_list[t])
     plt.legend()
     plt.title("k=" + str(k_mer_len) + " iter=" + str(iterations) +
               " batch_size=" + str(batch_size) + " embed_dim=" + str(128))  # RECORD DIMENSION HERE
 
-    os.system('say "finished"')
     plt.savefig("Figures/triplet_figure")
-    # plt.show()
+    plt.show()
+
+
+
+
+
+    # # test model, print loss when every genome compared against every other
+    # top_k = visualization_batch_size  # calculate test loss on all triplets, not just easiest
+    # for a_num in range(0, len(file_list)):
+    #     a_embeddings = 0
+    #     for b_num in range(0, len(file_list)):
+    #         # print("a, b: {},{}".format(a_num, b_num))
+    #         if a_num == b_num:
+    #             confusion_matrix[a_num, b_num] = float('nan')
+    #         else:
+    #             # a_name = file_list[a_name]
+    #             # b_name = file_list[b_name]
+    #
+    #             test_batch = seq_dataset_generator.generate_data_test(visualization_batch_size, a_num, b_num)
+    #             test_loss = sess.run(triplet.loss, feed_dict={triplet.x: test_batch[0], triplet.xp: test_batch[1],
+    #                                                           triplet.xn: test_batch[2]})
+    #             confusion_matrix[a_num, b_num] = test_loss
+    #
+    #             try:
+    #                 a_embeddings = np.append(a_embeddings, sess.run(triplet.o, feed_dict={triplet.x: test_batch[0]}),
+    #                                          axis=0)
+    #             except ValueError:
+    #                 a_embeddings = sess.run(triplet.o, feed_dict={triplet.x: test_batch[0]})
+    #
+    #     embed_array.append(a_embeddings)
+    #     mean = np.mean(embed_array[a_num], axis=0)
+    #     mean_vecs.append(mean)
+    #     dist_from_mean = embed_array[a_num] - mean
+    #     sq_dist = np.square(dist_from_mean)
+    #     mag_dist = np.linalg.norm(sq_dist, axis=1)
+    #     var = sqrt(sum(mag_dist))
+    #     vars.append(var)
+    #
+    # for a_num in range(0, len(file_list)):
+    #     for b_num in range(0, len(file_list)):
+    #         distance_matrix[a_num, b_num] = np.linalg.norm(mean_vecs[a_num] - mean_vecs[b_num])
+    #
+    # print("variances")
+    # print(vars)
+    # print("distance matrix")
+    # print(distance_matrix)
+    # print("confusion matrix of losses")
+    # print(confusion_matrix)
+    #
+    # print("...graphing test embeddings")
+    # flat_list = [item for sublist in embed_array for item in sublist]
+    #
+    # tsne_model = TSNE(n_components=2, verbose=0)
+    # Y = tsne_model.fit_transform(flat_list)
+    #
+    # cmap = get_cmap(len(file_list)+1)
+    #
+    # for a_num in range(0, len(file_list)):
+    #     start = visualization_batch_size*a_num*(len(file_list) - 1)
+    #     stop = start + visualization_batch_size*(len(file_list) - 1)
+    #     plt.scatter(Y[start:stop, 0], Y[start:stop, 1], c=cmap(a_num), label=file_list[a_num])
+    # plt.legend()
+    # plt.title("k=" + str(k_mer_len) + " iter=" + str(iterations) +
+    #           " batch_size=" + str(batch_size) + " embed_dim=" + str(128))  # RECORD DIMENSION HERE
+    #
+    # os.system('say "finished"')
+    # plt.savefig("Figures/triplet_figure")
+    # # plt.show()
 
 
