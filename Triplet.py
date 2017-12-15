@@ -14,6 +14,7 @@ matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
 
+# this function binarizes DNA sequences (takes in sequence)
 def seq2binary(seq):
     binary_kmer = np.zeros((len(seq), seq_dim))
     for i in range(0, len(seq)):
@@ -35,16 +36,18 @@ class SeqDatasetGenerator(object):
         self.kmers_train = kmers_train
         self.kmers_test = kmers_test
 
+    # the function returns a list of Genbank sequence file names in the Genomes directory
     @staticmethod
     def get_file_list():
         file_list = []
         for file_name in os.listdir('Genomes'):
-            # print(file_name)
             file_name = os.path.join("Genomes", file_name)
             if file_name.endswith(".gbff"):
                 file_list.append(file_name)
         return file_list
 
+    # this function generates lists of k-mers from reference sequences,
+    # and partitions the k-mer lists into training and testing sets
     @staticmethod
     def default_load(k):
         kmers_train = []
@@ -81,11 +84,13 @@ class SeqDatasetGenerator(object):
             kmers_train[i] = kmers_train[i][test_num:]
         return SeqDatasetGenerator(kmers_train, kmers_test), file_list, org_names
 
+    # this function writes the k-mer lists to a text file
     def save_to_file(self, file_name):
         f = open(file_name, 'wb')
         pickle.dump([self.kmers_train, self.kmers_test], f)
         f.close()
 
+    # this function reads the k-mer lists from a text file
     @staticmethod
     def load_from_file(file_name):
         f = open(file_name, 'rb')
@@ -93,10 +98,13 @@ class SeqDatasetGenerator(object):
         f.close()
         return SeqDatasetGenerator(kmers_train=kmers_list[0], kmers_test=kmers_list[1])
 
+    # this function binarizes sample k-mers
     @staticmethod
     def __make_vec(xs):
         return np.array(list(map(seq2binary, xs)))
 
+    # this function chooses reference samples (xs), positive samples (xps), and negative samples (xns) from the
+    # reference k-mer lists
     @staticmethod
     def __generate_data(batch_size, kmers):
         xs = []
@@ -114,6 +122,7 @@ class SeqDatasetGenerator(object):
         xns = SeqDatasetGenerator.__make_vec(xns)
         return xs, xps, xns
 
+    # this function chooses samples from the specified genomes for plotting and validation purposes
     @staticmethod
     def __generate_data_one_genome(batch_size, kmers, a_num, b_num):
         xs = []
@@ -141,25 +150,24 @@ class SeqDatasetGenerator(object):
         return SeqDatasetGenerator.__generate_data_one_genome(batch_size, self.kmers_test, a_num, b_num)
 
 
+# update weights for convolutional filter
 def weight_variable(shape):
     initial = tf.truncated_normal(shape, stddev=0.01)
     return tf.get_variable("weights", dtype=tf.float32, initializer=initial)
 
 
+# update bias for convolutional filter
 def bias_variable(shape):
     initial = tf.constant(0.01, shape=shape, dtype=tf.float32)
     return tf.get_variable("biases", dtype=tf.float32, initializer=initial)
 
 
+# perform the convolution
 def conv1d(x, W):
     return tf.nn.conv1d(x, W, stride=1, padding='SAME')
 
 
-def max_pool_2x2(x):
-    return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
-                          strides=[1, 2, 2, 1], padding='SAME')
-
-
+# compute euclidean distances between two sample embeddings
 def compute_euclidean_distances(x, y, w=None):
     d = tf.square(tf.subtract(x, y))
     if w is not None:
@@ -168,6 +176,7 @@ def compute_euclidean_distances(x, y, w=None):
     return d
 
 
+# get colors for plot
 def get_cmap(n, name='hsv'):
     return plt.cm.get_cmap(name, n)
 
@@ -176,9 +185,9 @@ class Triplet:
     def __init__(self, kmer_len, alpha):
 
         self.kmer_len = kmer_len
-        self.alpha = alpha
+        self.alpha = alpha  # alpha is the margin for the loss function
 
-        # Input and label placeholders
+        # make placeholders for all tensorflow variables
         with tf.variable_scope('input'):
             self.x = tf.placeholder(tf.float32, shape=[None, kmer_len, seq_dim], name='x')
             self.xp = tf.placeholder(tf.float32, shape=[None, kmer_len, seq_dim], name='xp')
@@ -187,20 +196,24 @@ class Triplet:
             self.neg_weights = tf.placeholder_with_default(shape=[None], name='neg_weights', input=np.array([]))
             self.top_k = tf.placeholder_with_default(shape=[], name='top_k_losses', input=75)
 
+        # embed samples
         with tf.variable_scope('embedding') as scope:
-            self.o = self.__embedding_network(self.x, kmer_len) # self.o is the embedded genome
+            self.o = self.__embedding_network(self.x, kmer_len)
             scope.reuse_variables()
             self.op = self.__embedding_network(self.xp, kmer_len)
             self.on = self.__embedding_network(self.xn, kmer_len)
 
+        # compute distances between sample embeddings
         with tf.variable_scope('distances'):
             self.dp = compute_euclidean_distances(self.o, self.op)
             self.dn = compute_euclidean_distances(self.o, self.on)
 
+        # define loss function
         with tf.variable_scope('loss'):
             self.loss = tf.nn.relu(tf.pow(self.dp, 2) - tf.pow(self.dn, 2) + alpha)
             self.loss = -tf.reduce_mean(tf.nn.top_k(-self.loss, k=self.top_k).values)
 
+    # define convolutional network layers
     def __embedding_network(self, x, kmer_len):
 
         dim = seq_dim
@@ -233,11 +246,11 @@ class Triplet:
             return tf.reshape(gpool, [-1, embed_dim])
 
 
-# set parameters
+# SET PARAMETERS HERE
 k_mer_len = 150
 batch_size = 1000
 logging_frequency = 25
-iterations = 500
+iterations = 400
 margin = 1
 visualization_batch_size = 100
 top_k_iter_start = 300
@@ -341,8 +354,8 @@ with tf.Session() as sess:
         plt.scatter(Y[start:stop, 0], Y[start:stop, 1], c=cmap(u),
                     label=unclassified_file_list[u].split("/")[1].split(".")[0])
 
-    plt.subplots_adjust(left=None, bottom=0.3, right=None, top=None, wspace=None, hspace=None)
-    plt.legend(bbox_to_anchor=(0, -0.45), loc="lower left")
+    plt.subplots_adjust(left=None, bottom=0.35, right=None, top=None, wspace=None, hspace=None)
+    plt.legend(bbox_to_anchor=(0, -0.65), loc="lower left")
     plt.title("k=" + str(k_mer_len) + " iter=" + str(iterations) +
               " batch_size=" + str(batch_size) + " embed_dim=" + str(embed_dim))
 
@@ -375,6 +388,7 @@ with tf.Session() as sess:
         var = sqrt(sum(mag_dist))
         vars.append(var)
 
+    # to label confusion matrix with genome names:
     # confusion_matrix = pd.DataFrame(confusion_matrix)
     # print(confusion_matrix)
     # confusion_matrix.columns = org_names
