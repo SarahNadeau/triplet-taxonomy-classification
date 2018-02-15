@@ -16,9 +16,9 @@ import os
 import pickle
 import numpy as np
 
-batch_size = 32
+batch_size = 4 ### was 32
 num_classes = 6 ### need to change if more genomes added
-epochs = 100 ### 100 --> 50% accuracy
+epochs = 2 ### 100 --> 50% accuracy
 data_augmentation = False
 save_dir = os.path.join(os.getcwd(), 'saved_models')
 model_name = 'keras_triplet_trained_model.h5'
@@ -60,33 +60,26 @@ def compute_euclidean_distances(x, y, w=None):
     d = tf.sqrt(tf.reduce_sum(d, axis=1))
     return d
 
-class SeqDatasetGenerator(object):
 
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
+class DatasetGenerator(object):
+
+    def __init__(self, x_in, y_in):
+        self.x = x_in
+        self.y = y_in
 
     # this function chooses reference samples (xs), positive samples (xps), and negative samples (xns) from the
     # reference k-mer lists
     @staticmethod
-    def __generate_data(batch_size, x, y):
-        for (xi, yi) in x, y:
-            print(xi, yi)
-        # xs = []
-        # xps = []
-        # xns = []
-        # for i in range(0, batch_size):
-        #     p, n = tuple(sample(range(0, len(kmers)), 2))
-        #     x, xp = tuple(sample(kmers[p], 2))
-        #     xn, = tuple(sample(kmers[n], 1))
-        #     xs.append(x)
-        #     xps.append(xp)
-        #     xns.append(xn)
-        # xs  = SeqDatasetGenerator.__make_vec(xs)
-        # xps = SeqDatasetGenerator.__make_vec(xps)
-        # xns = SeqDatasetGenerator.__make_vec(xns)
-        # return xs, xps, xns
-        return
+    def data_generator(batch_size, sample_dict):
+        keep_going = True
+        while keep_going:
+            p_class, n_class = np.random.choice(range(0, num_classes), 2, replace=False)
+            x_ind, p_ind = np.random.choice(range(0, len(sample_dict[p_class])), 2, replace=False)
+            x = sample_dict[p_class][x_ind]
+            xp = sample_dict[p_class][p_ind]
+            n_ind = np.random.choice(range(0, len(sample_dict[n_class])))
+            xn = sample_dict[n_class][n_ind]
+            yield x, xp, xn
 
 
 # The data, shuffled and split between train and test sets:
@@ -112,23 +105,48 @@ print(x_train.shape[0], 'train samples')
 print(x_test.shape[0], 'test samples')
 
 # Convert class vectors to binary class matrices.
+y_train_1D = y_train
 y_train = keras.utils.to_categorical(y_train, num_classes)
 y_test = keras.utils.to_categorical(y_test, num_classes)
 
+### attempting to mimic triplet paper
+# model = Sequential()
+# ### 32 is num filters, 3 is window size
+# model.add(Conv1D(32, 5, padding='same', input_shape=x_train.shape[1:]))
+# model.add(Activation('relu'))
+# model.add(MaxPooling1D(pool_size=2))
+# model.add(Conv1D(64, 3))
+# model.add(Activation('relu'))
+# model.add(MaxPooling1D(pool_size=2))
+# model.add(Conv1D(128, 3))
+# model.add(Activation('relu'))
+# model.add(MaxPooling1D(pool_size=2))
+# model.add(Conv1D(256, 2))
+# model.add(Flatten()) ### This isn't in the triplet paper, but they did have final embedding in 128D
+# # model.add(Dropout(0.25))
+
 model = Sequential()
 ### 32 is num filters, 3 is window size
-model.add(Conv1D(32, 5, padding='same', input_shape=x_train.shape[1:]))
+model.add(Conv1D(32, 3, padding='same', input_shape=x_train.shape[1:]))
+model.add(Activation('relu'))
+model.add(Conv1D(32, 3))
 model.add(Activation('relu'))
 model.add(MaxPooling1D(pool_size=2))
+model.add(Dropout(0.25))
+
+model.add(Conv1D(64, 3, padding='same'))
+model.add(Activation('relu'))
 model.add(Conv1D(64, 3))
 model.add(Activation('relu'))
 model.add(MaxPooling1D(pool_size=2))
-model.add(Conv1D(128, 3))
+model.add(Dropout(0.25))
+
+model.add(Flatten())
+model.add(Dense(512))
 model.add(Activation('relu'))
-model.add(MaxPooling1D(pool_size=2))
-model.add(Conv1D(256, 2))
-model.add(MaxPooling1D(pool_size=2)) ### This isn't in the triplet paper, but they did have final embedding in 128D
-# model.add(Dropout(0.25))
+model.add(Dropout(0.5))
+model.add(Dense(num_classes))
+model.add(Activation('softmax'))
 
 # initiate RMSprop optimizer
 opt = keras.optimizers.rmsprop(lr=0.0001, decay=1e-6)
@@ -143,31 +161,13 @@ x_test = x_test.astype('float32')
 x_train /= 255
 x_test /= 255
 
-print(x_train)
-print(x_test)
 
-
-if not data_augmentation:
-    print('Not using data augmentation.')
-    model.fit(x_train, y_train,
-              batch_size=batch_size,
-              epochs=epochs,
-              validation_data=(x_test, y_test),
-              shuffle=True)
-# else:
-#     print('Using real-time data augmentation.')
-#     # This will do preprocessing and realtime data augmentation:
-#     datagen = ImageDataGenerator(
-#         featurewise_center=False,  # set input mean to 0 over the dataset
-#         samplewise_center=False,  # set each sample mean to 0
-#         featurewise_std_normalization=False,  # divide inputs by std of the dataset
-#         samplewise_std_normalization=False,  # divide each input by its std
-#         zca_whitening=False,  # apply ZCA whitening
-#         rotation_range=0,  # randomly rotate images in the range (degrees, 0 to 180)
-#         width_shift_range=0.1,  # randomly shift images horizontally (fraction of total width)
-#         height_shift_range=0.1,  # randomly shift images vertically (fraction of total height)
-#         horizontal_flip=True,  # randomly flip images
-#         vertical_flip=False)  # randomly flip images
+print('Not using data augmentation.')
+model.fit(x_train, y_train,
+          batch_size=batch_size,
+          epochs=epochs,
+          validation_data=(x_test, y_test),
+          shuffle=True)
 
     # Compute quantities required for feature-wise normalization
     # (std, mean, and principal components if ZCA whitening is applied).
@@ -180,8 +180,16 @@ if not data_augmentation:
     #                     validation_data=(x_test, y_test),
     #                     workers=4)
 
-    # Fit the model on batches generated by me
-    model.fit_generator(SeqDatasetGenerator.__generate_data(x_train, y_train))
+# Fit the model on batches generated by me
+x_train_dict = {} # keys are integer y_train labels, values are list of corresponding x_train samples
+for i in range(0, len(x_train)):
+    if y_train_1D[i] not in x_train_dict:
+        x_train_dict[y_train_1D[i]] = [x_train[i]]
+    else:
+        x_train_dict[y_train_1D[i]].append(x_train[i])
+
+model.fit_generator(DatasetGenerator.data_generator(batch_size,
+                    sample_dict=x_train_dict), epochs=epochs, steps_per_epoch=int(x_train.shape[0]/batch_size))
 
 # Save model and weights
 # if not os.path.isdir(save_dir):
