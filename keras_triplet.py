@@ -1,20 +1,44 @@
 
-# adapted from the following: https://keras.io/getting-started/sequential-model-guide/
+# adapted from the following: https://keras.io/getting-started/functional-api-guide/
+# with input from http://localhost:8972/notebooks/triplet_keras.ipynb
 
-'''Train a simple deep CNN on the CIFAR10 small images dataset.
-It gets to 75% validation accuracy in 25 epochs, and 79% after 50 epochs.
-(it's still underfitting at that point, though).
-'''
-
-from __future__ import print_function
 import keras
-from keras.preprocessing.image import ImageDataGenerator
-from keras.models import Sequential
-from keras.layers import Dense, Dropout, Activation, Flatten
-from keras.layers import Conv1D, MaxPooling1D
+from keras import backend as K
+from keras.optimizers import Adam
+from keras.layers import Input, LSTM, Dense
+from keras.layers import Embedding, Flatten, Input, merge
+from keras.models import Model
 import os
 import pickle
 import numpy as np
+
+seq_x = Input(shape=(150, 4))
+seq_p = Input(shape=(150, 4))
+seq_n = Input(shape=(150, 4))
+
+# This layer can take as input a matrix
+# and will return a vector of size 64
+shared_lstm = LSTM(64)
+
+# When we reuse the same layer instance
+# multiple times, the weights of the layer
+# are also being reused
+# (it is effectively *the same* layer)
+encoded_x = shared_lstm(seq_x)
+encoded_p = shared_lstm(seq_p)
+encoded_n = shared_lstm(seq_n)
+
+# Then calculate the loss
+def triplet_loss(encoded_x, encoded_p, encoded_n):
+    loss = 1 - K.sigmoid(
+        K.sum(encoded_x * encoded_p, axis=1, keepdims=True) -
+        K.sum(encoded_x * encoded_n, axis=1, keepdims=True))
+    return loss
+
+def build_model():
+    model.add(Conv1D(32, 5, padding='same', input_shape=x_train.shape[1:]))
+
+
 
 batch_size = 4 ### was 32
 num_classes = 6 ### need to change if more genomes added
