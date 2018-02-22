@@ -29,125 +29,119 @@ def seq2binary(seq):
             binary_kmer[i, 3] = 1
     return binary_kmer
 
+class DatasetGenerator(object):
 
-class SeqDatasetGenerator(object):
+    # def __init__(self, x_in, y_in):
+    #     self.x = x_in
+    #     self.y = y_in
 
-    def __init__(self, kmers_train, kmers_test):
-        self.kmers_train = kmers_train
-        self.kmers_test = kmers_test
+    # this function binarizes sample k-mers
+    # @staticmethod
+    # def make_vec(xs):
+    #     return np.array(list(map(seq2binary, xs)))
 
-    # the function returns a list of Genbank sequence file names in the Genomes directory
+    # sample reference seq (xs), positive seq (xps), and negative seq (xns)
     @staticmethod
-    def get_file_list():
-        file_list = []
-        for file_name in os.listdir('Genomes'):
-            file_name = os.path.join("Genomes", file_name)
-            if file_name.endswith(".gbff"):
-                file_list.append(file_name)
-        return file_list
+    def get_triplet_batch(sample_dict, batch_size):
+        xs = []
+        xps = []
+        xns = []
+        for i in range(0, batch_size):
+            num_classes = len(sample_dict.keys())
+            p_class, n_class = np.random.choice(range(0, num_classes), 2, replace=False)
+            x_ind, p_ind = np.random.choice(range(0, len(sample_dict[p_class])), 2, replace=False)
+            n_ind = np.random.choice(range(0, len(sample_dict[n_class])))
+            xs.append(seq2binary(sample_dict[p_class][x_ind]))
+            xps.append(seq2binary(sample_dict[p_class][p_ind]))
+            xns.append(seq2binary(sample_dict[n_class][n_ind]))
+        return xs, xps, xns
+
+# class SeqDatasetGenerator(object):
+#
+#     def __init__(self, kmers_train, kmers_test):
+#         self.kmers_train = kmers_train
+#         self.kmers_test = kmers_test
+#
+#     # the function returns a list of Genbank sequence file names in the Genomes directory
+#     @staticmethod
+#     def get_file_list():
+#         file_list = []
+#         for file_name in os.listdir('Genomes'):
+#             file_name = os.path.join("Genomes", file_name)
+#             if file_name.endswith(".gbff"):
+#                 file_list.append(file_name)
+#         return file_list
 
     # this function generates lists of k-mers from reference sequences,
     # and partitions the k-mer lists into training and testing sets
-    @staticmethod
-    def default_load(k):
-        kmers_train = []
-        kmers_test = []
-        num_kmers = []
-        org_names = []
-
-        file_list = SeqDatasetGenerator.get_file_list()
-
-        for file in file_list:
-            kmers = []
-            for accession in SeqIO.parse(file, 'genbank'):
-                print("genome {} has taxonomy {}".format(accession.id, accession.annotations["taxonomy"]))
-                org_names.append(accession.id)
-                seq = str(accession.seq)
-                for s in range(0, len(seq) - k + 1):
-                    kmers.append(seq[s:s + k])
-            kmers_train.append(kmers)
-
-        for kmers in kmers_train:
-            shuffle(kmers)
-        for i in range(0, len(kmers_train)):
-            num_kmers.append(len(kmers_train[i]))
-            print("# k-mers in genome {0}: {1}".format(file_list[i], len(kmers_train[i])))
-        for i in range(0, len(kmers_train)):
-            if num_kmers[i] > min(num_kmers):
-                kmers_train[i] = kmers_train[i][:min(num_kmers)]
-        num_kmers = len(kmers_train[0])
-        print("# k-mers in trimmed genomes: {0}".format(num_kmers))
-
-        for i in range(0, len(kmers_train)):
-            test_num = int(.1 * len(kmers_train[i]))
-            kmers_test.append(kmers_train[i][:test_num])
-            kmers_train[i] = kmers_train[i][test_num:]
-        return SeqDatasetGenerator(kmers_train, kmers_test), file_list, org_names
-
-    # this function writes the k-mer lists to a text file
-    def save_to_file(self, file_name):
-        f = open(file_name, 'wb')
-        pickle.dump([self.kmers_train, self.kmers_test], f)
-        f.close()
+    # @staticmethod
+    # def default_load(k):
+    #     kmers_train = []
+    #     kmers_test = []
+    #     num_kmers = []
+    #     org_names = []
+    #
+    #     file_list = SeqDatasetGenerator.get_file_list()
+    #
+    #     for file in file_list:
+    #         kmers = []
+    #         for accession in SeqIO.parse(file, 'genbank'):
+    #             print("genome {} has taxonomy {}".format(accession.id, accession.annotations["taxonomy"]))
+    #             org_names.append(accession.id)
+    #             seq = str(accession.seq)
+    #             for s in range(0, len(seq) - k + 1):
+    #                 kmers.append(seq[s:s + k])
+    #         kmers_train.append(kmers)
+    #
+    #     for kmers in kmers_train:
+    #         shuffle(kmers)
+    #     for i in range(0, len(kmers_train)):
+    #         num_kmers.append(len(kmers_train[i]))
+    #         print("# k-mers in genome {0}: {1}".format(file_list[i], len(kmers_train[i])))
+    #     for i in range(0, len(kmers_train)):
+    #         if num_kmers[i] > min(num_kmers):
+    #             kmers_train[i] = kmers_train[i][:min(num_kmers)]
+    #     num_kmers = len(kmers_train[0])
+    #     print("# k-mers in trimmed genomes: {0}".format(num_kmers))
+    #
+    #     for i in range(0, len(kmers_train)):
+    #         test_num = int(.1 * len(kmers_train[i]))
+    #         kmers_test.append(kmers_train[i][:test_num])
+    #         kmers_train[i] = kmers_train[i][test_num:]
+    #     return SeqDatasetGenerator(kmers_train, kmers_test), file_list, org_names
+    #
+    # # this function writes the k-mer lists to a text file
+    # def save_to_file(self, file_name):
+    #     f = open(file_name, 'wb')
+    #     pickle.dump([self.kmers_train, self.kmers_test], f)
+    #     f.close()
 
     # this function reads the k-mer lists from a text file
-    @staticmethod
-    def load_from_file(file_name):
-        f = open(file_name, 'rb')
-        kmers_list = pickle.load(f)
-        f.close()
-        return SeqDatasetGenerator(kmers_train=kmers_list[0], kmers_test=kmers_list[1])
+    # @staticmethod
+    # def load_from_file(file_name):
+    #     f = open(file_name, 'rb')
+    #     kmers_list = pickle.load(f)
+    #     f.close()
+    #     return SeqDatasetGenerator(kmers_train=kmers_list[0], kmers_test=kmers_list[1])
 
-    # this function binarizes sample k-mers
-    @staticmethod
-    def __make_vec(xs):
-        return np.array(list(map(seq2binary, xs)))
-
-    # this function chooses reference samples (xs), positive samples (xps), and negative samples (xns) from the
-    # reference k-mer lists
-    @staticmethod
-    def __generate_data(batch_size, kmers):
-        xs = []
-        xps = []
-        xns = []
-        for i in range(0, batch_size):
-            p, n = tuple(sample(range(0, len(kmers)), 2))
-            x, xp = tuple(sample(kmers[p], 2))
-            xn, = tuple(sample(kmers[n], 1))
-            xs.append(x)
-            xps.append(xp)
-            xns.append(xn)
-        xs  = SeqDatasetGenerator.__make_vec(xs)
-        xps = SeqDatasetGenerator.__make_vec(xps)
-        xns = SeqDatasetGenerator.__make_vec(xns)
-        return xs, xps, xns
-
-    # this function chooses samples from the specified genomes for plotting and validation purposes
-    @staticmethod
-    def __generate_data_one_genome(batch_size, kmers, a_num, b_num):
-        xs = []
-        xps = []
-        xns = []
-        for i in range(0, batch_size):
-            p, n = (a_num, b_num)
-            x, xp = tuple(sample(kmers[p], 2))
-            xn, = tuple(sample(kmers[n], 1))
-            xs.append(x)
-            xps.append(xp)
-            xns.append(xn)
-        xs = SeqDatasetGenerator.__make_vec(xs)
-        xps = SeqDatasetGenerator.__make_vec(xps)
-        xns = SeqDatasetGenerator.__make_vec(xns)
-        return xs, xps, xns
-
-    def generate_data_train(self, batch_size):
-        return SeqDatasetGenerator.__generate_data(batch_size, self.kmers_train)
-
-    def generate_data_visualization(self, batch_size, a_num, b_num):
-        return SeqDatasetGenerator.__generate_data_one_genome(batch_size, self.kmers_train, a_num, b_num)
-
-    def generate_data_test(self, batch_size, a_num, b_num):
-        return SeqDatasetGenerator.__generate_data_one_genome(batch_size, self.kmers_test, a_num, b_num)
+    # # this function chooses reference samples (xs), positive samples (xps), and negative samples (xns) from the
+    # # reference k-mer lists
+    # @staticmethod
+    # def __generate_data(batch_size, kmers):
+    #     xs = []
+    #     xps = []
+    #     xns = []
+    #     for i in range(0, batch_size):
+    #         p, n = tuple(sample(range(0, len(kmers)), 2))
+    #         x, xp = tuple(sample(kmers[p], 2))
+    #         xn, = tuple(sample(kmers[n], 1))
+    #         xs.append(x)
+    #         xps.append(xp)
+    #         xns.append(xn)
+    #     xs  = SeqDatasetGenerator.__make_vec(xs)
+    #     xps = SeqDatasetGenerator.__make_vec(xps)
+    #     xns = SeqDatasetGenerator.__make_vec(xns)
+    #     return xs, xps, xns
 
 
 # update weights for convolutional filter
@@ -246,6 +240,12 @@ class Triplet:
             return tf.reshape(gpool, [-1, embed_dim])
 
 
+# translate string data labels to ints
+def enumerate_y_labels(y_str):
+    ylabel_dict = dict([(y, x) for x, y in enumerate(set(sorted(y_str)))])
+    return [ylabel_dict[x] for x in y_str]
+
+
 # SET PARAMETERS HERE
 k_mer_len = 150
 batch_size = 1000
@@ -259,32 +259,52 @@ seq_dim = 4
 test_num = 10
 embed_dim = 128
 
-print("...loading k-mers from genome files")
-try:
-    seq_dataset_generator = SeqDatasetGenerator.load_from_file(file_name=str(k_mer_len)+'seq_dataset')
-    file_list = SeqDatasetGenerator.get_file_list()
-    for i in range(0, len(file_list)):
-        file_list[i] = file_list[i].split('/')[1].split('.')[0]
-    org_names = file_list
-except FileNotFoundError:
-    seq_dataset_generator, file_list, org_names = SeqDatasetGenerator.default_load(k=k_mer_len)
-    seq_dataset_generator.save_to_file(file_name=str(k_mer_len)+'seq_dataset')
+# load data
+def load_data():
+    with open('/Users/nadeau/Documents/Metagenome_Classification/train_test_set/X_test150.pickle', 'rb') as f:
+        x_test = pickle.load(f)
+        print(x_test)
+        # # make sequences into sentances of words
+        # # https://machinelearningmastery.com/use-word-embedding-layers-deep-learning-keras/
+        # x_test = [[letter for letter in word] for word in x_test]
+        # x_test = [" ".join(letters) for letters in x_test]
+        # f.close()
+    with open('/Users/nadeau/Documents/Metagenome_Classification/train_test_set/X_train150.pickle', 'rb') as f:
+        x_train = pickle.load(f)
+        # x_train = [[letter for letter in word] for word in x_train]
+        # x_train = [" ".join(letters) for letters in x_train]
+        # f.close()
+    with open('/Users/nadeau/Documents/Metagenome_Classification/train_test_set/y_test150.pickle', 'rb') as f:
+        y_test_str = pickle.load(f)
+        y_test = enumerate_y_labels(y_test_str)
+        print(y_test)
+        f.close()
+    with open('/Users/nadeau/Documents/Metagenome_Classification/train_test_set/y_train150.pickle', 'rb') as f:
+        y_train_str = pickle.load(f)
+        y_train = enumerate_y_labels(y_train_str)
+        f.close()
+    return x_test, x_train, y_test, y_train
 
-unclassified_file_list = []
-for file_name in os.listdir('SRA_Test_Sequences'):
-    if file_name.endswith(".fastq"):
-        file_name = os.path.join('SRA_Test_Sequences', file_name)
-        unclassified_file_list.append(file_name)
 
-triplet = Triplet(kmer_len=k_mer_len, alpha=margin)
-train_step = tf.train.AdamOptimizer(10e-5).minimize(triplet.loss)
+# load data
+x_test, x_train, y_test, y_train = load_data()
 
-print("...training  model")
+# build training sample dictionary to group reads by organism
+# keys are integer y_train labels, values are list of corresponding x_train samples
+x_train_dict = {}
+for i in range(0, len(x_train)):
+    if y_train[i] not in x_train_dict:
+        x_train_dict[y_train[i]] = [x_train[i]]
+    else:
+        x_train_dict[y_train[i]].append(x_train[i])
+
+
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
+    print("...training  model")
     for i in range(iterations):
         top_k = batch_size if i < top_k_iter_start else n_easiest
-        batch = seq_dataset_generator.generate_data_train(batch_size)
+        batch = DatasetGenerator.get_triplet_batch(x_train_dict, batch_size)
         if i % logging_frequency == 0:
             loss = sess.run(triplet.loss, feed_dict={triplet.top_k: n_easiest, triplet.x: batch[0],
                                                      triplet.xp: batch[1], triplet.xn: batch[2]})
@@ -292,101 +312,52 @@ with tf.Session() as sess:
         train_step.run(feed_dict={triplet.top_k: top_k, triplet.x: batch[0], triplet.xp: batch[1],
                                   triplet.xn: batch[2]})
 
-    print("...embedding unclassified k-mers")
-    train_embed_array = []
-    train_mean_vecs = []
-    train_vars = []
-    embed_array = []
-    confusion_matrix = np.zeros((len(file_list), len(file_list)))
-    distance_matrix = np.zeros((len(file_list), len(file_list)))
-    mean_vecs = []
-    vars = []
-    unclassified_embed_array = []
+    print("...testing")
+    # train_embed_array = []
+    # train_mean_vecs = []
+    # train_vars = []
+    # embed_array = []
+    # confusion_matrix = np.zeros((len(file_list), len(file_list)))
+    # distance_matrix = np.zeros((len(file_list), len(file_list)))
+    # mean_vecs = []
+    # vars = []
+    # unclassified_embed_array = []
+    #
+    # # embed unclassified reads
+    # for file in unclassified_file_list:
+    #     unclassified_reads = get_test_reads(file, k_mer_len, test_num)
+    #     for i in range(0, len(unclassified_reads)):
+    #         unclassified_reads[i] = seq2binary(unclassified_reads[i])
+    #     unclassified_embeddings = sess.run(triplet.o, feed_dict={triplet.x: unclassified_reads})
+    #     unclassified_embed_array.append(unclassified_embeddings)
 
-    # embed training k-mers for plotting
-    for a_num in range(0, len(file_list)):
-        a_embeddings = 0
-        for b_num in range(0, len(file_list)):
-            if a_num != b_num:
-                visualize_batch = seq_dataset_generator.generate_data_visualization(visualization_batch_size, a_num, b_num)
-                try:
-                    a_embeddings = np.append(a_embeddings, sess.run(triplet.o, feed_dict={triplet.x: visualize_batch[0]}), axis=0)
-                except ValueError:
-                    a_embeddings = sess.run(triplet.o, feed_dict={triplet.x: visualize_batch[0]})
 
-        train_embed_array.append(a_embeddings)
-        mean = np.mean(train_embed_array[a_num], axis=0)
-        train_mean_vecs.append(mean)
-        dist_from_mean = train_embed_array[a_num] - mean
-        sq_dist = np.square(dist_from_mean)
-        mag_dist = np.linalg.norm(sq_dist, axis=1)
-        var = sqrt(sum(mag_dist))
-        train_vars.append(var)
-
-    # embed unclassified reads
-    for file in unclassified_file_list:
-        unclassified_reads = get_test_reads(file, k_mer_len, test_num)
-        for i in range(0, len(unclassified_reads)):
-            unclassified_reads[i] = seq2binary(unclassified_reads[i])
-        unclassified_embeddings = sess.run(triplet.o, feed_dict={triplet.x: unclassified_reads})
-        unclassified_embed_array.append(unclassified_embeddings)
-
-    # plot unclassified reads with training set embeddings
-    print("...creating figure \n")
-    flat_list = [item for sublist in train_embed_array for item in sublist]
-    flat_list = flat_list + [item for sublist in unclassified_embed_array for item in sublist]
-
-    tsne_model = TSNE(n_components=2, verbose=0)
-    Y = tsne_model.fit_transform(flat_list)
-
-    cmap = get_cmap(len(unclassified_file_list) + len(file_list) + 2)
-
-    for t in range(0, len(file_list)):
-        start = visualization_batch_size * t * (len(file_list) - 1)
-        stop = start + visualization_batch_size * (len(file_list) - 1)
-        plt.scatter(Y[start:stop, 0], Y[start:stop, 1], c=cmap(len(unclassified_file_list) + 1 + t),
-                    label=org_names[t])
-        end_of_train = stop
-
-    for u in range(0, len(unclassified_file_list)):
-        start = test_num * u + end_of_train
-        stop = start + test_num
-        plt.scatter(Y[start:stop, 0], Y[start:stop, 1], c=cmap(u),
-                    label=unclassified_file_list[u].split("/")[1].split(".")[0])
-
-    plt.subplots_adjust(left=None, bottom=0.35, right=None, top=None, wspace=None, hspace=None)
-    plt.legend(bbox_to_anchor=(0, -0.65), loc="lower left")
-    plt.title("k=" + str(k_mer_len) + " iter=" + str(iterations) +
-              " batch_size=" + str(batch_size) + " embed_dim=" + str(embed_dim))
-
-    plt.savefig("Figures/train_and_unknown")
-
-    # test model, print confusion matrix
-    for a_num in range(0, len(file_list)):
-        a_embeddings = 0
-        for b_num in range(0, len(file_list)):
-            if a_num == b_num:
-                confusion_matrix[a_num, b_num] = float('nan')
-            else:
-                test_batch = seq_dataset_generator.generate_data_test(visualization_batch_size, a_num, b_num)
-                test_loss = sess.run(triplet.loss, feed_dict={triplet.x: test_batch[0], triplet.xp: test_batch[1],
-                                                              triplet.xn: test_batch[2]})
-                confusion_matrix[a_num, b_num] = test_loss
-
-                try:
-                    a_embeddings = np.append(a_embeddings, sess.run(triplet.o, feed_dict={triplet.x: test_batch[0]}),
-                                             axis=0)
-                except ValueError:
-                    a_embeddings = sess.run(triplet.o, feed_dict={triplet.x: test_batch[0]})
-
-        embed_array.append(a_embeddings)
-        mean = np.mean(embed_array[a_num], axis=0)
-        mean_vecs.append(mean)
-        dist_from_mean = embed_array[a_num] - mean
-        sq_dist = np.square(dist_from_mean)
-        mag_dist = np.linalg.norm(sq_dist, axis=1)
-        var = sqrt(sum(mag_dist))
-        vars.append(var)
+    # # test model, print confusion matrix
+    # for a_num in range(0, len(file_list)):
+    #     a_embeddings = 0
+    #     for b_num in range(0, len(file_list)):
+    #         if a_num == b_num:
+    #             confusion_matrix[a_num, b_num] = float('nan')
+    #         else:
+    #             test_batch = seq_dataset_generator.generate_data_test(visualization_batch_size, a_num, b_num)
+    #             test_loss = sess.run(triplet.loss, feed_dict={triplet.x: test_batch[0], triplet.xp: test_batch[1],
+    #                                                           triplet.xn: test_batch[2]})
+    #             confusion_matrix[a_num, b_num] = test_loss
+    #
+    #             try:
+    #                 a_embeddings = np.append(a_embeddings, sess.run(triplet.o, feed_dict={triplet.x: test_batch[0]}),
+    #                                          axis=0)
+    #             except ValueError:
+    #                 a_embeddings = sess.run(triplet.o, feed_dict={triplet.x: test_batch[0]})
+    #
+    #     embed_array.append(a_embeddings)
+    #     mean = np.mean(embed_array[a_num], axis=0)
+    #     mean_vecs.append(mean)
+    #     dist_from_mean = embed_array[a_num] - mean
+    #     sq_dist = np.square(dist_from_mean)
+    #     mag_dist = np.linalg.norm(sq_dist, axis=1)
+    #     var = sqrt(sum(mag_dist))
+    #     vars.append(var)
 
     # to label confusion matrix with genome names:
     # confusion_matrix = pd.DataFrame(confusion_matrix)
@@ -394,18 +365,18 @@ with tf.Session() as sess:
     # confusion_matrix.columns = org_names
     # confusion_matrix.index = org_names
 
-    for a_num in range(0, len(file_list)):
-        for b_num in range(0, len(file_list)):
-            distance_matrix[a_num, b_num] = np.linalg.norm(mean_vecs[a_num] - mean_vecs[b_num])
-
-    print("variance of embeddings for each genome:")
-    print(vars, '\n')
-    print("distances between mean embeddings of each genome:")
-    print(distance_matrix, '\n')
-    print("testing losses in comparisons between genomes:")
-    print(confusion_matrix)
-
-    os.system('say "finished"')
+    # for a_num in range(0, len(file_list)):
+    #     for b_num in range(0, len(file_list)):
+    #         distance_matrix[a_num, b_num] = np.linalg.norm(mean_vecs[a_num] - mean_vecs[b_num])
+    #
+    # print("variance of embeddings for each genome:")
+    # print(vars, '\n')
+    # print("distances between mean embeddings of each genome:")
+    # print(distance_matrix, '\n')
+    # print("testing losses in comparisons between genomes:")
+    # print(confusion_matrix)
+    #
+    # os.system('say "finished"')
 
 
 
