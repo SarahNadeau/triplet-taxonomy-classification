@@ -279,7 +279,7 @@ for file_name in os.listdir('SRA_Test_Sequences'):
 triplet = Triplet(kmer_len=k_mer_len, alpha=margin)
 train_step = tf.train.AdamOptimizer(10e-5).minimize(triplet.loss)
 
-print("...training model")
+print("...training  model")
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     for i in range(iterations):

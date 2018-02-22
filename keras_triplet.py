@@ -1,19 +1,17 @@
 
 # adapted from the following: https://keras.io/getting-started/functional-api-guide/
 # with input from http://localhost:8972/notebooks/triplet_keras.ipynb
+# triplet model implementation: https://github.com/maciejkula/triplet_recommendations_keras
 
 import keras
 from keras import backend as K
 from keras.optimizers import Adam
-from keras.models import Sequential
-from keras.layers import Input, LSTM, Dense
 from keras.layers import Embedding, Flatten, Input, merge
 from keras.models import Model
 import os
 import pickle
 import numpy as np
 from keras.preprocessing.text import one_hot
-import metrics
 
 # seq_x = Input(shape=(150, 4))
 # seq_p = Input(shape=(150, 4))
@@ -43,11 +41,11 @@ import metrics
 
 batch_size = 4
 num_classes = 6 ### need to change if more genomes added
-epochs = 2      ### 100 --> 50% accuracy
+epochs = 2
 save_dir = os.path.join(os.getcwd(), 'saved_models')
 model_name = 'keras_triplet_trained_model.h5'
-vocab_size = 10 ###
-embed_dim = 2   ###
+vocab_size = 10 ### why 10 necessary to get A,C,T,G,N all hashed differently?
+embed_dim = 2   ### should choose more appropriate dimension?
 # binarize an array of DNA sequences
 # takes in a 1D array of DNA sequences, returns a 2D array of binarized DNA sequences
 # def seq2binary(seqs):
@@ -221,7 +219,7 @@ X = {
     'xn_input': xn
 }
 
-model.fit(X, np.ones(len(x)), batch_size=batch_size, nb_epoch=1, verbose=0, shuffle=True)
+model.fit(X, np.ones(len(x)), batch_size=batch_size, epochs=1, verbose=0, shuffle=True)
 
 # evaluate the model
 # loss, accuracy = model.evaluate(x_train, y_train, verbose=0)
