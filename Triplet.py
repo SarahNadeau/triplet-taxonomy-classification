@@ -12,6 +12,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
+from tensorflow.python import debug as tf_debug
 
 
 # this function binarizes DNA sequences (takes in sequence)
@@ -170,11 +171,6 @@ def compute_euclidean_distances(x, y, w=None):
     return d
 
 
-# get colors for plot
-def get_cmap(n, name='hsv'):
-    return plt.cm.get_cmap(name, n)
-
-
 class Triplet:
     def __init__(self, kmer_len, alpha):
 
@@ -248,11 +244,10 @@ def enumerate_y_labels(y_str):
 
 # SET PARAMETERS HERE
 k_mer_len = 150
-batch_size = 1000
-logging_frequency = 25
-iterations = 400
+batch_size = 40
+logging_frequency = 10
+iterations = 50
 margin = 1
-visualization_batch_size = 100
 top_k_iter_start = 300
 n_easiest = batch_size
 seq_dim = 4
@@ -263,21 +258,13 @@ embed_dim = 128
 def load_data():
     with open('/Users/nadeau/Documents/Metagenome_Classification/train_test_set/X_test150.pickle', 'rb') as f:
         x_test = pickle.load(f)
-        print(x_test)
-        # # make sequences into sentances of words
-        # # https://machinelearningmastery.com/use-word-embedding-layers-deep-learning-keras/
-        # x_test = [[letter for letter in word] for word in x_test]
-        # x_test = [" ".join(letters) for letters in x_test]
-        # f.close()
+        f.close()
     with open('/Users/nadeau/Documents/Metagenome_Classification/train_test_set/X_train150.pickle', 'rb') as f:
         x_train = pickle.load(f)
-        # x_train = [[letter for letter in word] for word in x_train]
-        # x_train = [" ".join(letters) for letters in x_train]
-        # f.close()
+        f.close()
     with open('/Users/nadeau/Documents/Metagenome_Classification/train_test_set/y_test150.pickle', 'rb') as f:
         y_test_str = pickle.load(f)
         y_test = enumerate_y_labels(y_test_str)
-        print(y_test)
         f.close()
     with open('/Users/nadeau/Documents/Metagenome_Classification/train_test_set/y_train150.pickle', 'rb') as f:
         y_train_str = pickle.load(f)
@@ -286,8 +273,10 @@ def load_data():
     return x_test, x_train, y_test, y_train
 
 
-# load data
+# load data, print summary
 x_test, x_train, y_test, y_train = load_data()
+print("{} training samples".format(len(x_train)))
+print("{} testing samples".format(len(x_test)))
 
 # build training sample dictionary to group reads by organism
 # keys are integer y_train labels, values are list of corresponding x_train samples
@@ -298,13 +287,17 @@ for i in range(0, len(x_train)):
     else:
         x_train_dict[y_train[i]].append(x_train[i])
 
+triplet = Triplet(kmer_len=k_mer_len, alpha=margin)
+train_step = tf.train.AdamOptimizer(10e-5).minimize(triplet.loss)
 
 with tf.Session() as sess:
+    # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
     sess.run(tf.global_variables_initializer())
     print("...training  model")
     for i in range(iterations):
         top_k = batch_size if i < top_k_iter_start else n_easiest
         batch = DatasetGenerator.get_triplet_batch(x_train_dict, batch_size)
+        # print(len(batch[0]))
         if i % logging_frequency == 0:
             loss = sess.run(triplet.loss, feed_dict={triplet.top_k: n_easiest, triplet.x: batch[0],
                                                      triplet.xp: batch[1], triplet.xn: batch[2]})
