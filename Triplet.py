@@ -24,7 +24,6 @@ def load_data():
         f.close()
     return x_test, x_train, y_test, y_train
 
-
 # translate string data labels to ints
 def enumerate_y_labels(y_str):
     ylabel_dict = dict([(y, x) for x, y in enumerate(set(sorted(y_str)))])
@@ -82,10 +81,13 @@ def conv1d(x, W):
 
 # compute euclidean distances between two sample embeddings
 def compute_euclidean_distances(x, y, w=None):
-    d = tf.square(tf.subtract(x, y))
+    x = tf.check_numerics(x, "got passed NaN to compute euclidean distance")
+    y = tf.check_numerics(y, "got passed NaN to compute euclidean distance")
+    d = tf.subtract(x, y)
     if w is not None:
         d = tf.transpose(tf.multiply(tf.transpose(d), w))
-    d = tf.sqrt(tf.reduce_sum(d, axis=1))
+    # d = tf.check_numerics(tf.sqrt(tf.reduce_sum(d, axis=1)), "euclidean distance wrong")
+    # d = tf.check_numerics(tf.reduce_sum(d, axis=1), "euclidean distance wrong")
     return d
 
 
@@ -100,6 +102,11 @@ class Triplet:
             self.x = tf.placeholder(tf.float32, shape=[None, kmer_len, seq_dim], name='x')
             self.xp = tf.placeholder(tf.float32, shape=[None, kmer_len, seq_dim], name='xp')
             self.xn = tf.placeholder(tf.float32, shape=[None, kmer_len, seq_dim], name='xn')
+
+            self.x = tf.check_numerics(self.x, "x is NaN")
+            self.xp = tf.check_numerics(self.xp, "xp is NaN")
+            self.xn = tf.check_numerics(self.xn, "xn is NaN")
+
             self.pos_weights = tf.placeholder_with_default(shape=[None], name='pos_weights', input=np.array([]))
             self.neg_weights = tf.placeholder_with_default(shape=[None], name='neg_weights', input=np.array([]))
             self.top_k = tf.placeholder_with_default(shape=[], name='top_k_losses', input=75)
@@ -113,13 +120,23 @@ class Triplet:
 
         # compute distances between sample embeddings
         with tf.variable_scope('distances'):
+            self.o = tf.check_numerics(self.o, "o is NaN")
+            self.op = tf.check_numerics(self.op, "op is NaN")
+            self.on = tf.check_numerics(self.on, "on is NaN")
+
             self.dp = compute_euclidean_distances(self.o, self.op)
             self.dn = compute_euclidean_distances(self.o, self.on)
 
+            # check what dimension l2 loss takes norm on
+            tf.Tensor
+            self.dp = tf.nn.l2_loss(self.dp)
+            self.dn = tf.nn.l2_loss(self.dn)
+
         # define loss function
         with tf.variable_scope('loss'):
-            self.loss = tf.nn.relu(tf.pow(self.dp, 2) - tf.pow(self.dn, 2) + alpha)
-            self.loss = -tf.reduce_mean(tf.nn.top_k(-self.loss, k=self.top_k).values)
+            self.losses = tf.nn.relu(self.dp - (self.dn - alpha)) + 0.1*self.dn
+            # self.loss = -tf.reduce_mean(tf.nn.top_k(-self.loss, k=self.top_k).values)
+            self.loss = tf.reduce_mean(self.losses)
             # doesn't help to eliminate top_k
 
     # define convolutional network layers
@@ -157,15 +174,17 @@ class Triplet:
 
 # SET PARAMETERS HERE
 k_mer_len = 150
-batch_size = 1
+seq_dim = 4
+embed_dim = 128
+
+batch_size = 32
+margin = 3
+iterations = 100
+
 logging_frequency = 10
-iterations = 10
-margin = 1
 top_k_iter_start = 300
 n_easiest = batch_size
-seq_dim = 4
-test_num = 10
-embed_dim = 128
+
 
 # load data, print summary
 x_test, x_train, y_test, y_train = load_data()
@@ -183,7 +202,7 @@ for i in range(0, len(x_train)):
 
 # create graph
 triplet = Triplet(kmer_len=k_mer_len, alpha=margin)
-train_step = tf.train.AdamOptimizer(10e-5).minimize(triplet.loss)
+train_step = tf.train.AdamOptimizer(10e-4).minimize(triplet.loss)
 
 # train model
 with tf.Session() as sess:
@@ -194,9 +213,10 @@ with tf.Session() as sess:
         top_k = batch_size if i < top_k_iter_start else n_easiest
         batch = get_triplet_batch(x_train_dict, batch_size)
         if i % logging_frequency == 0:
-            loss = sess.run(triplet.loss, feed_dict={triplet.top_k: n_easiest, triplet.x: batch[0],
+            loss, losses, dp, dn = sess.run([triplet.loss, triplet.losses, triplet.dp, triplet.dn], feed_dict={triplet.top_k: n_easiest, triplet.x: batch[0],
                                                      triplet.xp: batch[1], triplet.xn: batch[2]})
             print('step %d, training loss %g' % (i, loss))
+            print(losses.shape)
         train_step.run(feed_dict={triplet.top_k: top_k, triplet.x: batch[0], triplet.xp: batch[1],
                                   triplet.xn: batch[2]})
 
@@ -205,13 +225,13 @@ with tf.Session() as sess:
     train_reads = []
     for train_read in tqdm(x_train):
         train_reads.append(seq2binary(train_read))
-        train_embeddings = sess.run(triplet.o, feed_dict={triplet.x: train_reads})
+    train_embeddings = sess.run(triplet.o, feed_dict={triplet.x: train_reads})
 
     # embed test reads -- test_embeddings is a list of 128D sequence embeddings
     test_reads = []
     for test_read in tqdm(x_test):
         test_reads.append(seq2binary(test_read))
-        test_embeddings = sess.run(triplet.o, feed_dict={triplet.x: test_reads})
+    test_embeddings = sess.run(triplet.o, feed_dict={triplet.x: test_reads})
 
 # find knn for test reads among train reads
 knn_model = KNeighborsClassifier(n_neighbors=3)
