@@ -9,6 +9,8 @@ from sklearn.neighbors import KNeighborsClassifier
 from tqdm import tqdm
 from tensorflow.python import debug as tf_debug
 import random
+from sklearn.decomposition import PCA as sklearnPCA
+import matplotlib.pyplot as plt
 
 
 # load data from standardized train/test set as raw sequences
@@ -130,18 +132,12 @@ def compute_distances(x, y, w=None):
 
 
 class Triplet:
-    def __init__(self, kmer_len, alpha):
+    def __init__(self, kmer_len):
 
         self.kmer_len = kmer_len
-        self.alpha = alpha  # alpha is the margin for the loss function
 
         # make placeholders for all tensorflow variables
         with tf.variable_scope('input'):
-            # self.x = tf.placeholder(tf.as_dtype(np.float32), shape=[None, kmer_len, seq_dim], name='x')
-            # self.xp = tf.placeholder(tf.as_dtype(np.float32), shape=[None, kmer_len, seq_dim], name='xp')
-            # self.xn = tf.placeholder(tf.as_dtype(np.float32), shape=[None, kmer_len, seq_dim], name='xn')
-
-            # how it was before 2/26
             self.x = tf.placeholder(tf.float32, shape=[None, kmer_len, seq_dim], name='x')
             self.xp = tf.placeholder(tf.float32, shape=[None, kmer_len, seq_dim], name='xp')
             self.xn = tf.placeholder(tf.float32, shape=[None, kmer_len, seq_dim], name='xn')
@@ -180,7 +176,7 @@ class Triplet:
         # define loss function
         with tf.variable_scope('loss'):
             # self.losses = tf.nn.relu(self.dp - (self.dn - alpha)) # + 0.1*self.dp
-            self.losses = tf.nn.relu(self.np - (self.nn - alpha))
+            self.losses = tf.nn.relu((1 - pull_to_push) * self.np - (pull_to_push*self.nn - margin))
             # self.loss = tf.reduce_mean(self.losses)
             self.top_k_losses = tf.nn.top_k(self.losses, k=self.top_k).values
             self.loss = tf.reduce_mean(tf.nn.top_k(self.losses, k=self.top_k).values)
@@ -191,7 +187,7 @@ class Triplet:
         dim = seq_dim
         with tf.variable_scope('conv1'):
             out = 32
-            w = weight_variable([3, dim, out])
+            w = weight_variable([window_size, dim, out])
             b = bias_variable([out])
             h = tf.nn.relu(conv1d(x, w) + b)
             dim = out
@@ -199,7 +195,7 @@ class Triplet:
 
         with tf.variable_scope('conv2'):
             out = 64
-            w = weight_variable([3, dim, out])
+            w = weight_variable([window_size, dim, out])
             b = bias_variable([out])
             h = tf.nn.relu(conv1d(x, w) + b)
             dim = out
@@ -207,7 +203,7 @@ class Triplet:
 
         with tf.variable_scope('conv3'):
             out = 128
-            w = weight_variable([3, dim, out])
+            w = weight_variable([window_size, dim, out])
             b = bias_variable([out])
             h = tf.nn.relu(conv1d(x, w) + b)
             dim = out
@@ -222,16 +218,18 @@ class Triplet:
 k_mer_len = 150
 seq_dim = 4  # 5 if raw sequence input, 1 if vectorized by n-gram frequency input
 embed_dim = 128
+window_size = 10
 
-batch_size = 64
+batch_size = 32
+pull_to_push = 0.5 # between 0 and 1
 margin = 3
-iterations = 500
+iterations = 200
 
 logging_frequency = 10
 top_k_iter_start = 200
-n_hardest = int(batch_size / 2)
+n_hardest = batch_size
 
-n_neighbors = 3
+n_neighbors = 10
 
 
 # load data, print summary
@@ -249,10 +247,10 @@ for i in range(0, len(X_train)):
         x_train_dict[y_train[i]].append(X_train[i])
 
 # create graph
-triplet = Triplet(kmer_len=k_mer_len, alpha=margin)
+triplet = Triplet(kmer_len=k_mer_len)
 train_step = tf.train.AdamOptimizer(10e-4).minimize(triplet.loss)
 
-# train model
+# train model with top-k
 with tf.Session() as sess:
     # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
     sess.run(tf.global_variables_initializer())
@@ -264,18 +262,6 @@ with tf.Session() as sess:
             loss, losses, dp, dn, x, o, top_k_losses, normp, xp, xn = sess.run([triplet.loss, triplet.losses, triplet.dp, triplet.dn, triplet.x, triplet.o, triplet.top_k_losses, triplet.np, triplet.xp, triplet.xn],
                        feed_dict={triplet.top_k: top_k, triplet.x: batch[0], triplet.xp: batch[1],
                                   triplet.xn: batch[2]})
-
-            # print("x shape: {}".format(x.shape))
-            # print("xn shape: {}".format(xn.shape))
-            # print("xp shape {}".format(xp.shape))
-            # print("top k: {}".format(top_k))
-            # print("np shape: {}".format(np.shape))
-            # print("top k losses shape: {}".format(top_k_losses.shape))
-            # print("self.o shape: {}".format(o.shape))
-            # print("self.x shape: {}".format(x.shape))
-            # print("self.dp shape: {}".format(dp.shape))
-            # print("self.losses shape: {}".format(losses.shape))
-            # print("self.loss shape: {}".format(loss.shape))
             print('step %d, training loss %g' % (i, loss))
         train_step.run(feed_dict={triplet.top_k: top_k, triplet.x: batch[0], triplet.xp: batch[1],
                                   triplet.xn: batch[2]})
@@ -297,6 +283,14 @@ with tf.Session() as sess:
 knn_model = KNeighborsClassifier(n_neighbors=n_neighbors)
 knn_model.fit(train_embeddings, y_train)
 print("Testing Error: {}".format((1 - knn_model.score(test_embeddings, y_test))*100))
+
+# plot separation of embeddings from genomes
+pca = sklearnPCA(n_components=2)  # 2-dimensional PCA
+transformed = pca.fit_transform(train_embeddings)
+y_colors = list(y_train)
+plt.scatter(transformed[:, 0], transformed[:, 1], c=y_colors)
+plt.title("PCA of train embeddings")
+plt.show()
 
 
 
