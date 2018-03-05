@@ -11,6 +11,9 @@ from tensorflow.python import debug as tf_debug
 import random
 from sklearn.decomposition import PCA as sklearnPCA
 import matplotlib.pyplot as plt
+import pandas as pd
+from sklearn.metrics import pairwise
+from mpl_toolkits.mplot3d import Axes3D
 
 
 # load data from standardized train/test set as raw sequences
@@ -23,19 +26,20 @@ def load_data():
         f.close()
     with open('/Users/nadeau/Documents/Metagenome_Classification/Classification_Test_Data/raw_seq_train_test/{}bp_{}seqs_y_test.pickle'.format(seq_len, num_seqs), 'rb') as f:
         y_test_str = pickle.load(f)
-        y_test = enumerate_y_labels(y_test_str)
+        y_test, y_label_dict = enumerate_y_labels(y_test_str)
         f.close()
     with open('/Users/nadeau/Documents/Metagenome_Classification/Classification_Test_Data/raw_seq_train_test/{}bp_{}seqs_y_train.pickle'.format(seq_len, num_seqs), 'rb') as f:
         y_train_str = pickle.load(f)
-        y_train = enumerate_y_labels(y_train_str)
+        y_train, y_label_dict = enumerate_y_labels(y_train_str)
         f.close()
 
-    return X_test, X_train, y_test, y_train
+    return X_test, X_train, y_test, y_train, y_label_dict
 
 # translate string data labels to ints
 def enumerate_y_labels(y_str):
     ylabel_dict = dict([(y, x) for x, y in enumerate(sorted(set(y_str)))])
-    return [ylabel_dict[x] for x in y_str]
+    reverse_ylabel_dict = dict([(x, y) for x, y in enumerate(sorted(set(y_str)))])
+    return [ylabel_dict[x] for x in y_str], reverse_ylabel_dict
 
 
 # binarize DNA sequences (takes in sequence)
@@ -209,9 +213,9 @@ embed_dim = 128
 window_size = 3
 
 batch_size = 32
-pull_to_push = 0.5 # between 0 and 1
+pull_to_push = 0.7 # between 0 and 1
 margin = 3
-iterations = 200
+iterations = 10 #200
 
 logging_frequency = 10
 top_k_iter_start = 200
@@ -221,7 +225,7 @@ n_neighbors = 10
 
 
 # load data, print summary
-X_test, X_train, y_test, y_train = load_data()
+X_test, X_train, y_test, y_train, y_label_dict = load_data()
 print("{} training samples".format(len(X_train)))
 print("{} testing samples".format(len(X_test)))
 
@@ -261,6 +265,15 @@ with tf.Session() as sess:
         train_reads.append(seq2binary(train_read))
     train_embeddings = sess.run(triplet.o, feed_dict={triplet.x: train_reads})
 
+    # build training sample embedding dictionary to group read embeddings by organism
+    # keys are integer y_train labels, values are list of corresponding x_train samples
+    x_train_embedding_dict = {}
+    for y_id in x_train_dict:
+        train_reads = []
+        for train_read in tqdm(x_train_dict[y_id]):
+            train_reads.append(seq2binary(train_read))
+        x_train_embedding_dict[y_id] = sess.run(triplet.o, feed_dict={triplet.x: train_reads})
+
     # embed test reads -- test_embeddings is a list of 128D sequence embeddings
     test_reads = []
     for test_read in tqdm(X_test):
@@ -272,13 +285,46 @@ knn_model = KNeighborsClassifier(n_neighbors=n_neighbors)
 knn_model.fit(train_embeddings, y_train)
 print("Testing Error: {}".format((1 - knn_model.score(test_embeddings, y_test))*100))
 
-# plot separation of embeddings from genomes
+# calculate cluster distances and standard deviations
+index = []
+for y_id in x_train_embedding_dict.keys():
+    index.append(y_label_dict[y_id])
+means_df = pd.DataFrame(index=x_train_embedding_dict.keys(), columns=np.arange(embed_dim))
+for y_id in x_train_embedding_dict.keys():
+    mean = np.mean(x_train_embedding_dict[y_id], axis=0)
+    means_df.loc[y_id] = mean
+
+distances = pairwise.euclidean_distances(means_df)
+print("pairwise distances between centroids of clusters:")
+print(pd.DataFrame(distances, index=index, columns=index))
+
+
+
+# plot separation of embeddings from training genomes
 pca = sklearnPCA(n_components=2)  # 2-dimensional PCA
 transformed = pca.fit_transform(train_embeddings)
 y_colors = list(y_train)
 plt.scatter(transformed[:, 0], transformed[:, 1], c=y_colors)
-plt.title("PCA of train embeddings")
+plt.title("PCA of Training Sequence 128-D Embeddings")
 plt.show()
+
+# # plot separation of embeddings from testing genomes
+# pca = sklearnPCA(n_components=2)  # 2-dimensional PCA
+# transformed = pca.fit_transform(test_embeddings)
+# y_colors = list(y_test)
+# plt.scatter(transformed[:, 0], transformed[:, 1], c=y_colors)
+# plt.title("PCA of Testing Sequence 128-D Embeddings")
+# plt.show()
+
+# # try for 3-D plot
+# ax = plt.subplot(111, projection='3d')
+# pca = sklearnPCA(n_components=3)  # 3-dimensional PCA
+# transformed = pca.fit_transform(train_embeddings)
+# print(transformed)
+# y_colors = list(y_train)
+# ax.plot(transformed[:, 0], transformed[:, 1], transformed[:, 2], 'o')
+# plt.show()
+# # colors need to be 3 or 4 digits
 
 
 
