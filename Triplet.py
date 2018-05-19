@@ -17,7 +17,9 @@ from sklearn.metrics import pairwise
 # input parameters
 DATA_LOC = '/Users/nadeau/Documents/MS_research/Metagenome_Classification/Classification_Test_Data/Triplet_data/'
 SEQ_LEN = 150
-NUM_SEQS = 400
+NUM_TRAIN = 400
+NUM_TRAIN_GENOMES = 3
+NUM_TEST = 80
 SEQ_DIM = 4  # 4 if raw sequence input, 1 if vectorized by n-gram frequency input
 
 # network parameters
@@ -37,22 +39,14 @@ N_NEIGHBORS = 10
 
 # load data from standardized train/test set as 150bp DNA sequences {A, C, T, G}
 def load_data():
-    with open(DATA_LOC + '{}bp_{}seqs_X_TEST.pickle'.format(SEQ_LEN, NUM_SEQS), 'rb') as f:
-        X_test = pickle.load(f)
+    with open(DATA_LOC + '{}bp_{}seqs_TEST.pickle'.format(SEQ_LEN, NUM_TEST), 'rb') as f:
+        test_dict = pickle.load(f)
         f.close()
-    with open(DATA_LOC + '{}bp_{}seqs_X_TRAIN.pickle'.format(SEQ_LEN, NUM_SEQS), 'rb') as f:
-        X_train = pickle.load(f)
-        f.close()
-    with open(DATA_LOC + '{}bp_{}seqs_y_TEST.pickle'.format(SEQ_LEN, NUM_SEQS), 'rb') as f:
-        y_test_str = pickle.load(f)
-        y_test, y_label_dict = enumerate_y_labels(y_test_str)
-        f.close()
-    with open(DATA_LOC + '{}bp_{}seqs_y_TRAIN.pickle'.format(SEQ_LEN, NUM_SEQS), 'rb') as f:
-        y_train_str = pickle.load(f)
-        y_train, y_label_dict = enumerate_y_labels(y_train_str)
+    with open(DATA_LOC + '{}bp_{}seqs_TRAIN.pickle'.format(SEQ_LEN, NUM_TRAIN), 'rb') as f:
+        train_dict = pickle.load(f)
         f.close()
 
-    return X_test, X_train, y_test, y_train, y_label_dict
+    return train_dict, test_dict
 
 
 # translate string data labels to ints
@@ -224,18 +218,24 @@ class Triplet:
 def main():
 
     # load data, print summary
-    x_test, x_train, y_test, y_train, y_label_dict = load_data()
-    print("{} training samples".format(len(x_train)))
-    print("{} testing samples".format(len(x_test)))
+    train_dict, test_dict = load_data()
 
-    # build training sample dictionary to group reads by organism
-    # keys are integer y_train labels, values are list of corresponding x_train samples
-    x_train_dict = {}
-    for i in range(0, len(x_train)):
-        if y_train[i] not in x_train_dict:
-            x_train_dict[y_train[i]] = [x_train[i]]
-        else:
-            x_train_dict[y_train[i]].append(x_train[i])
+    # enumerate y labels
+    y_label_dict = {}
+    i = 0
+    for y_str in train_dict.keys():
+        y_label_dict[y_str] = i
+        i += 1
+
+    for y_str in test_dict.keys():
+        y_label_dict[y_str] = i
+        i += 1
+
+    for y_str in y_label_dict.keys():
+        if y_str in train_dict.keys():
+            train_dict[y_label_dict[y_str]] = train_dict.pop(y_str)
+        if y_str in test_dict.keys():
+            test_dict[y_label_dict[y_str]] = test_dict.pop(y_str)
 
     # create graph
     triplet = Triplet(kmer_len=SEQ_LEN)
@@ -248,7 +248,7 @@ def main():
         print("...training  model")
         for i in range(ITERATIONS):
             top_k = BATCH_SIZE if i < TOP_K_ITER_START else K_HARDEST
-            batch = get_triplet_batch(x_train_dict, BATCH_SIZE)
+            batch = get_triplet_batch(train_dict, BATCH_SIZE)
             if i % LOG_FREQ == 0:
                 loss = sess.run(triplet.loss, feed_dict={triplet.top_k: top_k, triplet.x: batch[0],
                                                               triplet.xp: batch[1], triplet.xn: batch[2]})
@@ -258,69 +258,64 @@ def main():
 
         # embed training reads -- train_embeddings is a list of 128D sequence embeddings
         print("...classifying")
-        train_reads = []
-        for train_read in tqdm(x_train):
-            train_reads.append(seq2binary(train_read))
-        train_embeddings = sess.run(triplet.o, feed_dict={triplet.x: train_reads})
-
         # build training sample embedding dictionary to group read embeddings by organism
         # keys are integer y_train labels, values are list of corresponding x_train samples
-        x_train_embedding_dict = {}
-        for y_id in x_train_dict:
-            train_reads = []
-            for train_read in tqdm(x_train_dict[y_id]):
-                train_reads.append(seq2binary(train_read))
-            x_train_embedding_dict[y_id] = sess.run(triplet.o, feed_dict={triplet.x: train_reads})
+        x_train_reads = []
+        y_train = []
+        for y_int in train_dict.keys():
+            for seq in train_dict[y_int]:
+                x_train_reads.append(seq2binary(seq))
+                y_train.append(y_int)
 
-        # embed test reads -- test_embeddings is a list of 128D sequence embeddings
-        test_reads = []
-        for test_read in tqdm(x_test):
-            test_reads.append(seq2binary(test_read))
-        test_embeddings = sess.run(triplet.o, feed_dict={triplet.x: test_reads})
+        x_train_embeddings = sess.run(triplet.o, feed_dict={triplet.x: x_train_reads})
+
+        x_test_reads = []
+        y_test = []
+        for y_int in test_dict.keys():
+            for seq in test_dict[y_int]:
+                x_test_reads.append(seq2binary(seq))
+                y_test.append(y_int)
+
+        x_test_embeddings = sess.run(triplet.o, feed_dict={triplet.x: x_test_reads})
 
     # find knn for test reads among train reads
     knn_model = KNeighborsClassifier(n_neighbors=N_NEIGHBORS)
-    knn_model.fit(train_embeddings, y_train)
-    print("Testing Error: {}".format((1 - knn_model.score(test_embeddings, y_test))*100))
+    print(np.asarray(x_train_embeddings).shape)
+    print(np.asarray(x_test_embeddings).shape)
+    # print(np.reshape(np.asarray(x_train_embeddings), (1200, 128)).shape)
+    knn_model.fit(x_train_embeddings, y_train)
+    print("Testing Error: {}".format((1 - knn_model.score(x_test_embeddings, y_test))*100))
+    ### currently 100% because test sequence has diff label than train sequences
 
     # calculate cluster distances and standard deviations
-    index = []
-    for y_id in x_train_embedding_dict.keys():
-        index.append(y_label_dict[y_id])
-    means_df = pd.DataFrame(index=x_train_embedding_dict.keys(), columns=np.arange(EMBED_DIM))
-    for y_id in x_train_embedding_dict.keys():
-        mean = np.mean(x_train_embedding_dict[y_id], axis=0)
-        means_df.loc[y_id] = mean
+    # index = []
+    # for y_id in train_dict.keys():
+    #     index.append(y_id)
+    # means_df = pd.DataFrame(index=train_dict.keys(), columns=np.arange(EMBED_DIM))
+    # for y_id in train_dict.keys():
+    #     mean = np.mean(x_train_embedding_dict[y_id], axis=0)
+    #     means_df.loc[y_id] = mean
+    ### currently broken because no embedding dictionary
 
-    distances = pairwise.euclidean_distances(means_df)
-    print("pairwise distances between centroids of clusters:")
-    print(pd.DataFrame(distances, index=index, columns=index))
+    # distances = pairwise.euclidean_distances(means_df)
+    # print("pairwise distances between centroids of clusters:")
+    # print(pd.DataFrame(distances, index=index, columns=index))
 
     # plot separation of embeddings from training genomes
     pca = sklearnPCA(n_components=2)  # 2-dimensional PCA
-    transformed = pca.fit_transform(train_embeddings)
+    transformed = pca.fit_transform(x_train_embeddings)
     y_colors = list(y_train)
     plt.scatter(transformed[:, 0], transformed[:, 1], c=y_colors)
     plt.title("PCA of Training Sequence 128-D Embeddings")
     plt.show()
 
     # # plot separation of embeddings from testing genomes
-    # pca = sklearnPCA(n_components=2)  # 2-dimensional PCA
-    # transformed = pca.fit_transform(test_embeddings)
-    # y_colors = list(y_test)
-    # plt.scatter(transformed[:, 0], transformed[:, 1], c=y_colors)
-    # plt.title("PCA of Testing Sequence 128-D Embeddings")
-    # plt.show()
-
-    # # try for 3-D plot
-    # ax = plt.subplot(111, projection='3d')
-    # pca = sklearnPCA(n_components=3)  # 3-dimensional PCA
-    # transformed = pca.fit_transform(train_embeddings)
-    # print(transformed)
-    # y_colors = list(y_train)
-    # ax.plot(transformed[:, 0], transformed[:, 1], transformed[:, 2], 'o')
-    # plt.show()
-    # # colors need to be 3 or 4 digits
+    pca = sklearnPCA(n_components=2)  # 2-dimensional PCA
+    transformed = pca.fit_transform(x_test_embeddings)
+    y_colors = list(y_test)
+    plt.scatter(transformed[:, 0], transformed[:, 1], c=y_colors)
+    plt.title("PCA of Testing Sequence 128-D Embeddings")
+    plt.show()
 
 
 if __name__ == "__main__":
