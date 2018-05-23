@@ -12,6 +12,7 @@ from sklearn.decomposition import PCA as sklearnPCA
 import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.metrics import pairwise
+from matplotlib.lines import Line2D
 
 
 # input parameters
@@ -80,7 +81,7 @@ def seq2binary(seq):
 
 
 # return lists of samples, positive examples, and negative examples of the specified batch size
-def get_triplet_batch(sample_dict, batch_size):
+def get_triplet_batch(sample_dict, sample_label_dict, batch_size):
     xs = np.zeros(shape=(batch_size, SEQ_LEN, SEQ_DIM), dtype=np.float64)
     xps = np.zeros(shape=(batch_size, SEQ_LEN, SEQ_DIM), dtype=np.float64)
     xns = np.zeros(shape=(batch_size, SEQ_LEN, SEQ_DIM), dtype=np.float64)
@@ -89,13 +90,13 @@ def get_triplet_batch(sample_dict, batch_size):
         num_classes = len(sample_dict.keys())
         p_class, n_class = random.sample(range(0, num_classes), 2)
 
-        x_ind, p_ind = random.sample(range(len(sample_dict[p_class])), 2)
-        n_ind = random.randint(0, len(sample_dict[n_class]) - 1)
+        x_ind, p_ind = random.sample(range(len(sample_dict[sample_label_dict[p_class]])), 2)
+        n_ind = random.randint(0, len(sample_dict[sample_label_dict[n_class]]) - 1)
 
-        # for raw sequence input
-        xs[i, :] = seq2binary(sample_dict[p_class][x_ind])
-        xps[i, :] = seq2binary(sample_dict[p_class][p_ind])
-        xns[i, :] = seq2binary(sample_dict[n_class][n_ind])
+        # for raw sequence input - need sample_label_dict to translate between filname y labels and numerical y labels
+        xs[i, :] = seq2binary(sample_dict[sample_label_dict[p_class]][x_ind])
+        xps[i, :] = seq2binary(sample_dict[sample_label_dict[p_class]][p_ind])
+        xns[i, :] = seq2binary(sample_dict[sample_label_dict[n_class]][n_ind])
 
         # for vectorized input
         # xs.append(sample_dict[p_class][x_ind])
@@ -221,21 +222,14 @@ def main():
     train_dict, test_dict = load_data()
 
     # enumerate y labels
-    y_label_dict = {}
-    i = 0
-    for y_str in train_dict.keys():
-        y_label_dict[y_str] = i
-        i += 1
+    train_labels = train_dict.keys()
+    test_labels = test_dict.keys()
 
-    for y_str in test_dict.keys():
-        y_label_dict[y_str] = i
-        i += 1
+    enumerated_train_labels = np.arange(len(train_labels))
+    enumerated_test_labels = np.arange(len(test_labels))
 
-    for y_str in y_label_dict.keys():
-        if y_str in train_dict.keys():
-            train_dict[y_label_dict[y_str]] = train_dict.pop(y_str)
-        if y_str in test_dict.keys():
-            test_dict[y_label_dict[y_str]] = test_dict.pop(y_str)
+    train_label_dict = dict(zip(enumerated_train_labels, train_labels))
+    test_label_dict = dict(zip(enumerated_test_labels, test_labels))
 
     # create graph
     triplet = Triplet(kmer_len=SEQ_LEN)
@@ -248,7 +242,7 @@ def main():
         print("...training  model")
         for i in range(ITERATIONS):
             top_k = BATCH_SIZE if i < TOP_K_ITER_START else K_HARDEST
-            batch = get_triplet_batch(train_dict, BATCH_SIZE)
+            batch = get_triplet_batch(train_dict, train_label_dict, BATCH_SIZE)
             if i % LOG_FREQ == 0:
                 loss = sess.run(triplet.loss, feed_dict={triplet.top_k: top_k, triplet.x: batch[0],
                                                               triplet.xp: batch[1], triplet.xn: batch[2]})
@@ -303,30 +297,64 @@ def main():
     ### currently broken because no embedding dictionary
 
     # make PCA of samples before embedding for comparison
+    fig, ax = plt.subplots()
     x_train_reads = np.asarray(x_train_reads)
     x_train_reads = np.reshape(x_train_reads, (x_train_reads.shape[0], x_train_reads.shape[1]*x_train_reads.shape[2]))
     pca = sklearnPCA(n_components=2)  # 2-dimensional PCA
     transformed = pca.fit_transform(x_train_reads)
-    y_colors = list(y_train)
-    plt.scatter(transformed[:, 0], transformed[:, 1], c=y_colors)
-    plt.title("PCA of Binary Training Sequences")
-    plt.show()
+
+    cmap = plt.get_cmap('viridis')
+    unique_ys = pd.Series(list(y_train)).unique()
+    colors =cmap(np.linspace(0, 1, len(unique_ys)))
+    color_dict = dict(zip(unique_ys, colors))
+
+    plot_colors = []
+    for y in list(y_train):
+        plot_colors.append(color_dict[y])
+
+    legend_elements = []
+    for i in range(0, len(colors)):
+        legend_elements.append(Line2D([0], [0], marker='o', color=colors[i], label=unique_ys[i], markerfacecolor=tuple(colors[i]), markersize=5))
+
+    ax.scatter(transformed[:, 0], transformed[:, 1], c=plot_colors)
+    ax.legend(handles=legend_elements)
+    ax.set_title("PCA of Binary Training Sequences")
+    plt.show(fig)
+
 
     # plot separation of embeddings from training genomes
+    fig2, ax = plt.subplots()
     pca = sklearnPCA(n_components=2)  # 2-dimensional PCA
     transformed = pca.fit_transform(x_train_embeddings)
-    y_colors = list(y_train)
-    plt.scatter(transformed[:, 0], transformed[:, 1], c=y_colors)
-    plt.title("PCA of Training Sequence 128-D Embeddings")
-    plt.show()
 
-    # # plot separation of embeddings from testing genomes
+    ax.scatter(transformed[:, 0], transformed[:, 1], c=plot_colors)
+    ax.legend(handles=legend_elements)
+    ax.set_title("PCA of Training Sequence 128-D Embeddings")
+    plt.show(fig2)
+
+    # plot separation of embeddings from testing genomes
+    fig3, ax = plt.subplots()
     pca = sklearnPCA(n_components=2)  # 2-dimensional PCA
     transformed = pca.fit_transform(x_test_embeddings)
-    y_colors = list(y_test)
-    plt.scatter(transformed[:, 0], transformed[:, 1], c=y_colors)
-    plt.title("PCA of Testing Sequence 128-D Embeddings")
-    plt.show()
+
+    unique_ys = pd.Series(list(y_test)).unique()
+    colors = cmap(np.linspace(0, 1, len(unique_ys)))
+    color_dict = dict(zip(unique_ys, colors))
+
+    plot_colors = []
+    for y in list(y_test):
+        plot_colors.append(color_dict[y])
+
+    legend_elements = []
+    for i in range(0, len(colors)):
+        legend_elements.append(
+            Line2D([0], [0], marker='o', color=colors[i], label=unique_ys[i], markerfacecolor=tuple(colors[i]),
+                   markersize=5))
+
+    ax.scatter(transformed[:, 0], transformed[:, 1], c=plot_colors)
+    ax.legend(handles=legend_elements)
+    ax.set_title("PCA of Testing Sequence 128-D Embeddings")
+    plt.show(fig3)
 
 
 if __name__ == "__main__":
