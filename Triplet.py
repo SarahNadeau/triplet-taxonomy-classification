@@ -300,6 +300,17 @@ def main():
     # distances = pairwise.euclidean_distances(means_df)
     # print("pairwise distances between centroids of clusters:")
     # print(pd.DataFrame(distances, index=index, columns=index))
+    ### currently broken because no embedding dictionary
+
+    # make PCA of samples before embedding for comparison
+    x_train_reads = np.asarray(x_train_reads)
+    x_train_reads = np.reshape(x_train_reads, (x_train_reads.shape[0], x_train_reads.shape[1]*x_train_reads.shape[2]))
+    pca = sklearnPCA(n_components=2)  # 2-dimensional PCA
+    transformed = pca.fit_transform(x_train_reads)
+    y_colors = list(y_train)
+    plt.scatter(transformed[:, 0], transformed[:, 1], c=y_colors)
+    plt.title("PCA of Binary Training Sequences")
+    plt.show()
 
     # plot separation of embeddings from training genomes
     pca = sklearnPCA(n_components=2)  # 2-dimensional PCA
